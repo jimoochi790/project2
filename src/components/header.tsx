@@ -39,12 +39,12 @@ export function Header() {
     supabase.auth.getUser().then(async ({ data }) => {
       setUser(data.user);
       if (data.user) {
-        const { data: prof } = await supabase
+        const { data: prof, error } = await supabase
           .from("users")
           .select("role")
           .eq("id", data.user.id)
-          .single()
-        setProfile(prof)
+          .maybeSingle()
+        if (!error) setProfile(prof)
       }
       setLoading(false);
     });
@@ -53,12 +53,12 @@ export function Header() {
       setUser(session?.user ?? null);
       if (session?.user) {
         const supabase = createClient()
-        const { data: prof } = await supabase
+        const { data: prof, error } = await supabase
           .from("users")
           .select("role")
           .eq("id", session.user.id)
-          .single()
-        setProfile(prof)
+          .maybeSingle()
+        if (!error) setProfile(prof)
       } else {
         setProfile(null)
       }
