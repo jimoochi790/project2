@@ -35,15 +35,24 @@ export default async function TestDetailPage({ params }: Props) {
   } = await supabase.auth.getUser()
 
   let hasPurchased = false
+  let isAdmin = false
   if (user) {
-    const { data: purchase } = await supabase
-      .from("purchases")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("test_set_id", testSetId)
-      .maybeSingle()
+    const [purchaseRes, profileRes] = await Promise.all([
+      supabase
+        .from("purchases")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("test_set_id", testSetId)
+        .maybeSingle(),
+      supabase
+        .from("users")
+        .select("role")
+        .eq("id", user.id)
+        .single(),
+    ])
 
-    hasPurchased = !!purchase
+    hasPurchased = !!purchaseRes.data
+    isAdmin = profileRes.data?.role === "admin"
   }
 
   const whatsIncluded = [
@@ -147,7 +156,7 @@ export default async function TestDetailPage({ params }: Props) {
 
       {/* Action Button */}
       <div className="flex justify-center">
-        {user && hasPurchased ? (
+        {user && (isAdmin || hasPurchased) ? (
           <Link
             href={`/tests/${testSet.id}/take`}
             className="inline-flex items-center gap-2 rounded-lg bg-amber-400 px-8 py-3 text-base font-semibold text-[#1e293b] hover:bg-amber-300 transition-colors"

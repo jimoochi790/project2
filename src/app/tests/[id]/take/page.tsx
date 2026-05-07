@@ -57,6 +57,14 @@ export default function TakeTestPage() {
         return
       }
 
+      const { data: profile } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", user.id)
+        .single()
+
+      const isAdmin = profile?.role === "admin"
+
       const { data: ts } = await supabase
         .from("test_sets")
         .select("*")
@@ -68,6 +76,22 @@ export default function TakeTestPage() {
         router.push("/account")
         return
       }
+
+      if (!isAdmin) {
+        const { data: purchase } = await supabase
+          .from("purchases")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("test_set_id", testSetId)
+          .maybeSingle()
+
+        if (!purchase) {
+          toast.error("You need to purchase this test first")
+          router.push(`/tests/${testSetId}`)
+          return
+        }
+      }
+
       setTestSet(ts)
 
       const { data: qs } = await supabase
