@@ -29,19 +29,39 @@ export function Header() {
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<{ role: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
 
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(async ({ data }) => {
       setUser(data.user);
+      if (data.user) {
+        const { data: prof } = await supabase
+          .from("users")
+          .select("role")
+          .eq("id", data.user.id)
+          .single()
+        setProfile(prof)
+      }
       setLoading(false);
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setUser(session?.user ?? null);
+      if (session?.user) {
+        const supabase = createClient()
+        const { data: prof } = await supabase
+          .from("users")
+          .select("role")
+          .eq("id", session.user.id)
+          .single()
+        setProfile(prof)
+      } else {
+        setProfile(null)
+      }
     });
 
     return () => {
@@ -119,13 +139,13 @@ export function Header() {
                   Account
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => router.push("/account/tests")}
+                  onClick={() => router.push("/account")}
                   className="cursor-pointer"
                 >
                   <BookOpenIcon className="size-4" />
                   My Tests
                 </DropdownMenuItem>
-                {user.user_metadata?.role === "admin" && (
+                {profile?.role === "admin" && (
                   <DropdownMenuItem
                     onClick={() => router.push("/admin")}
                     className="cursor-pointer"
@@ -183,14 +203,14 @@ export function Header() {
                   <>
                     <div className="my-2 border-t" />
                     <Link
-                      href="/account/tests"
+                      href="/account"
                       onClick={() => setSheetOpen(false)}
                       className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-foreground hover:bg-muted"
                     >
                       <BookOpenIcon className="size-4" />
                       My Tests
                     </Link>
-                    {user.user_metadata?.role === "admin" && (
+                    {profile?.role === "admin" && (
                       <Link
                         href="/admin"
                         onClick={() => setSheetOpen(false)}
