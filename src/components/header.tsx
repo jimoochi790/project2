@@ -29,39 +29,19 @@ export function Header() {
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<{ role: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
 
-    supabase.auth.getUser().then(async ({ data }) => {
+    supabase.auth.getUser().then(({ data }) => {
       setUser(data.user);
-      if (data.user) {
-        const { data: prof, error } = await supabase
-          .from("users")
-          .select("role")
-          .eq("id", data.user.id)
-          .maybeSingle()
-        if (!error) setProfile(prof)
-      }
       setLoading(false);
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
-      if (session?.user) {
-        const supabase = createClient()
-        const { data: prof, error } = await supabase
-          .from("users")
-          .select("role")
-          .eq("id", session.user.id)
-          .maybeSingle()
-        if (!error) setProfile(prof)
-      } else {
-        setProfile(null)
-      }
     });
 
     return () => {
@@ -145,15 +125,13 @@ export function Header() {
                   <BookOpenIcon className="size-4" />
                   My Tests
                 </DropdownMenuItem>
-                {profile?.role === "admin" && (
-                  <DropdownMenuItem
-                    onClick={() => router.push("/admin")}
-                    className="cursor-pointer"
-                  >
-                    <ShieldIcon className="size-4" />
-                    Admin
-                  </DropdownMenuItem>
-                )}
+                <DropdownMenuItem
+                  onClick={() => router.push("/admin")}
+                  className="cursor-pointer"
+                >
+                  <ShieldIcon className="size-4" />
+                  Admin
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={handleSignOut}
@@ -210,16 +188,14 @@ export function Header() {
                       <BookOpenIcon className="size-4" />
                       My Tests
                     </Link>
-                    {profile?.role === "admin" && (
-                      <Link
-                        href="/admin"
-                        onClick={() => setSheetOpen(false)}
-                        className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-foreground hover:bg-muted"
-                      >
-                        <ShieldIcon className="size-4" />
-                        Admin
-                      </Link>
-                    )}
+                    <Link
+                      href="/admin"
+                      onClick={() => setSheetOpen(false)}
+                      className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-foreground hover:bg-muted"
+                    >
+                      <ShieldIcon className="size-4" />
+                      Admin
+                    </Link>
                     <button
                       onClick={() => {
                         setSheetOpen(false);
