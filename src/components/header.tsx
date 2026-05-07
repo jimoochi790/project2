@@ -99,11 +99,13 @@ export function Header() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
-                  <Avatar size="sm">
-                    <AvatarFallback className="bg-amber-400 text-[#1e293b] font-medium text-xs">
-                      {user.email?.charAt(0).toUpperCase() ?? "U"}
-                    </AvatarFallback>
-                  </Avatar>
+                  <button className="rounded-full ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <Avatar size="sm">
+                      <AvatarFallback className="bg-amber-400 text-[#1e293b] font-medium text-xs">
+                        {user.email?.charAt(0).toUpperCase() ?? "U"}
+                      </AvatarFallback>
+                    </Avatar>
+                  </button>
                 }
               />
               <DropdownMenuContent align="end" className="w-48">
