@@ -469,7 +469,17 @@ for (const subj of subjects) {
 
     const questionsSet = sets[t] || []
     for (let q = 0; q < questionsSet.length; q++) {
-      const [text, _, a, b, c, d, correct, solution] = questionsSet[q]
+      const entry = questionsSet[q]
+      let text, a, b, c, d, correct, solution
+      if (entry.length === 8) {
+        // Reading comprehension: [passage, question, optA, optB, optC, optD, correct, solution]
+        text = entry[0] + "\n\n" + entry[1]
+        a = entry[2]; b = entry[3]; c = entry[4]; d = entry[5]
+        correct = entry[6]; solution = entry[7]
+      } else {
+        // Math/thinking: [question, optA, optB, optC, optD, correct, solution]
+        [text, a, b, c, d, correct, solution] = entry
+      }
       const qNum = q + 1
       sql += `INSERT INTO questions (test_set_id, question_number, question_text, option_a, option_b, option_c, option_d, correct_option, solution_text, sort_order) VALUES (${testId}, ${qNum}, '${escape(text)}', '${escape(a)}', '${escape(b)}', '${escape(c)}', '${escape(d)}', '${correct}', '${escape(solution)}', ${qNum});\n`
     }
