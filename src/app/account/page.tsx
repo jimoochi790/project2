@@ -30,6 +30,13 @@ export default async function AccountPage() {
   } = await supabase.auth.getUser()
   if (!user) redirect("/login")
 
+  const { data: profile } = await supabase
+    .from("users")
+    .select("role")
+    .eq("id", user.id)
+    .single()
+  const isAdmin = profile?.role === "admin"
+
   const { data: purchases } = await supabase
     .from("purchases")
     .select(
@@ -57,10 +64,9 @@ export default async function AccountPage() {
     (p) => !attemptedTestSetIds.has(p.test_set_id) && p.test_set?.is_published
   )
 
-  const purchasedIds = new Set(typedPurchases.map((p) => p.test_set_id))
-  const attemptsForPurchased = typedAttempts.filter((a) =>
-    purchasedIds.has(a.test_set_id)
-  )
+  const attemptsForPurchased = isAdmin
+    ? typedAttempts
+    : typedAttempts.filter((a) => purchasedIds.has(a.test_set_id))
 
   const groupedBySubject = new Map<number, {
     subject: Subject
@@ -91,7 +97,7 @@ export default async function AccountPage() {
   }
 
   const isEmpty =
-    typedPurchases.length === 0 && typedAttempts.length === 0
+    typedPurchases.length === 0 && typedAttempts.length === 0 && !isAdmin
 
   return (
     <div className="min-h-[calc(100vh-3.5rem)] bg-[#0f172a]">
