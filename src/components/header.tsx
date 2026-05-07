@@ -117,15 +117,8 @@ export function Header() {
                   onClick={() => router.push("/account")}
                   className="cursor-pointer"
                 >
-                  <UserIcon className="size-4" />
-                  Account
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => router.push("/account")}
-                  className="cursor-pointer"
-                >
                   <BookOpenIcon className="size-4" />
-                  My Tests
+                  My Account
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => router.push("/admin")}
