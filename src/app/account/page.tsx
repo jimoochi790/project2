@@ -64,6 +64,7 @@ export default async function AccountPage() {
     (p) => !attemptedTestSetIds.has(p.test_set_id) && p.test_set?.is_published
   )
 
+  const purchasedIds = new Set(typedPurchases.map((p) => p.test_set_id))
   const attemptsForPurchased = isAdmin
     ? typedAttempts
     : typedAttempts.filter((a) => purchasedIds.has(a.test_set_id))
