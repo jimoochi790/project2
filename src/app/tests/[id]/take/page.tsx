@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { Timer } from "@/components/timer"
-import { QuestionNav } from "@/components/question-nav"
 import { QuestionCard } from "@/components/question-card"
+import { ProgressSummary } from "@/components/progress-summary"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -16,14 +16,11 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog"
-import { ClockIcon, AlertTriangleIcon, BookmarkIcon } from "lucide-react"
+import { ChevronLeftIcon, ChevronRightIcon, FlagIcon, InfoIcon, AlertTriangleIcon } from "lucide-react"
 import { toast } from "sonner"
 import type { Question, TestSet, TestAttempt } from "@/types"
 
-type AnswerInfo = {
-  selected: string | null
-  isFlagged: boolean
-}
+type AnswerInfo = { selected: string | null; isFlagged: boolean }
 
 export default function TakeTestPage() {
   const params = useParams<{ id: string }>()
@@ -35,9 +32,11 @@ export default function TakeTestPage() {
   const [attempt, setAttempt] = useState<TestAttempt | null>(null)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<number, AnswerInfo>>({})
+  const [visited, setVisited] = useState<Set<number>>(new Set([0]))
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
-  const [showSubmitDialog, setShowSubmitDialog] = useState(false)
+  const [showSummary, setShowSummary] = useState(false)
+  const [showFinishDialog, setShowFinishDialog] = useState(false)
 
   const initRef = useRef(false)
   const submitRef = useRef(false)
@@ -45,157 +44,93 @@ export default function TakeTestPage() {
   useEffect(() => {
     if (initRef.current) return
     initRef.current = true
-
     const supabase = createClient()
 
     async function init() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) {
-        router.push("/login")
-        return
-      }
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { router.push("/login"); return }
 
-      const { data: profile } = await supabase
-        .from("users")
-        .select("role")
-        .eq("id", user.id)
-        .single()
-
+      const { data: profile } = await supabase.from("users").select("role").eq("id", user.id).maybeSingle()
       const isAdmin = profile?.role === "admin"
 
-      const { data: ts } = await supabase
-        .from("test_sets")
-        .select("*")
-        .eq("id", testSetId)
-        .single()
-
-      if (!ts) {
-        toast.error("Test not found")
-        router.push("/account")
-        return
-      }
+      const { data: ts } = await supabase.from("test_sets").select("*").eq("id", testSetId).single()
+      if (!ts) { toast.error("Test not found"); router.push("/account"); return }
 
       if (!isAdmin) {
-        const { data: purchase } = await supabase
-          .from("purchases")
-          .select("id")
-          .eq("user_id", user.id)
-          .eq("test_set_id", testSetId)
-          .maybeSingle()
-
-        if (!purchase) {
-          toast.error("You need to purchase this test first")
-          router.push(`/tests/${testSetId}`)
-          return
-        }
+        const { data: purchase } = await supabase.from("purchases").select("id").eq("user_id", user.id).eq("test_set_id", testSetId).maybeSingle()
+        if (!purchase) { toast.error("You need to purchase this test first"); router.push(`/tests/${testSetId}`); return }
       }
 
       setTestSet(ts)
 
-      const { data: qs } = await supabase
-        .from("questions")
-        .select("*")
-        .eq("test_set_id", testSetId)
-        .order("sort_order", { ascending: true })
-
+      const { data: qs } = await supabase.from("questions").select("*").eq("test_set_id", testSetId).order("sort_order", { ascending: true })
       const questionList = qs ?? []
       setQuestions(questionList)
 
-      const { data: attemptData, error: attemptErr } = await supabase
-        .from("test_attempts")
-        .insert({
-          user_id: user.id,
-          test_set_id: testSetId,
-          started_at: new Date().toISOString(),
-          total_questions: questionList.length,
-          status: "in_progress",
-        })
-        .select()
-        .single()
+      const { data: attemptData, error: attemptErr } = await supabase.from("test_attempts").insert({
+        user_id: user.id, test_set_id: testSetId, started_at: new Date().toISOString(),
+        total_questions: questionList.length, status: "in_progress",
+      }).select().single()
 
-      if (attemptErr) {
-        toast.error("Failed to start test")
-        router.push("/account")
-        return
-      }
-
+      if (attemptErr) { toast.error("Failed to start test"); router.push("/account"); return }
       setAttempt(attemptData)
       setLoading(false)
     }
-
     init()
   }, [testSetId, router])
 
-  const saveAnswer = useCallback(
-    async (questionId: number, selected: string) => {
-      if (!attempt) return
+  const saveAnswer = useCallback(async (questionId: number, selected: string) => {
+    if (!attempt) return
+    const supabase = createClient()
+    await supabase.from("attempt_answers").upsert({
+      attempt_id: attempt.id, question_id: questionId, selected_option: selected,
+      is_flagged: false, answered_at: new Date().toISOString(),
+    }, { onConflict: "attempt_id,question_id" })
+  }, [attempt])
+
+  const handleAnswer = useCallback((questionId: number, selected: string) => {
+    const idx = currentIndex
+    setAnswers((prev) => ({ ...prev, [idx]: { selected, isFlagged: prev[idx]?.isFlagged ?? false } }))
+    setVisited((prev) => new Set(prev).add(idx))
+    saveAnswer(questionId, selected)
+  }, [currentIndex, saveAnswer])
+
+  const handleFlag = useCallback(() => {
+    const idx = currentIndex
+    const current = answers[idx] ?? { selected: null, isFlagged: false }
+    const newFlagged = !current.isFlagged
+    setAnswers((prev) => ({ ...prev, [idx]: { ...current, isFlagged: newFlagged } }))
+
+    const question = questions[idx]
+    if (question && attempt) {
       const supabase = createClient()
-      await supabase.from("attempt_answers").upsert(
-        {
-          attempt_id: attempt.id,
-          question_id: questionId,
-          selected_option: selected,
-          is_flagged: false,
-          answered_at: new Date().toISOString(),
-        },
-        { onConflict: "attempt_id,question_id" }
-      )
-    },
-    [attempt]
-  )
+      supabase.from("attempt_answers").upsert({
+        attempt_id: attempt.id, question_id: question.id, selected_option: current.selected,
+        is_flagged: newFlagged, answered_at: current.selected ? new Date().toISOString() : null,
+      }, { onConflict: "attempt_id,question_id" })
+    }
+  }, [currentIndex, answers, questions, attempt])
 
-  const handleAnswer = useCallback(
-    (questionId: number, selected: string) => {
-      const question = questions.find((q) => q.id === questionId)
-      if (!question) return
+  const goTo = useCallback((index: number) => {
+    if (index < 0 || index >= questions.length) return
+    setCurrentIndex(index)
+    setVisited((prev) => new Set(prev).add(index))
+  }, [questions.length])
 
-      const idx = question.question_number - 1
-      setAnswers((prev) => ({
-        ...prev,
-        [idx]: { selected, isFlagged: prev[idx]?.isFlagged ?? false },
-      }))
+  const handleBack = () => goTo(currentIndex - 1)
+  const handleNext = () => {
+    if (currentIndex >= questions.length - 1) {
+      setShowFinishDialog(true)
+    } else {
+      goTo(currentIndex + 1)
+    }
+  }
 
-      saveAnswer(questionId, selected)
-    },
-    [questions, saveAnswer]
-  )
-
-  const handleFlag = useCallback(
-    (questionId: number) => {
-      const question = questions.find((q) => q.id === questionId)
-      if (!question) return
-
-      const idx = question.question_number - 1
-      setAnswers((prev) => {
-        const current = prev[idx] ?? { selected: null, isFlagged: false }
-        const newFlagged = !current.isFlagged
-
-        if (attempt) {
-          const supabase = createClient()
-          supabase.from("attempt_answers").upsert(
-            {
-              attempt_id: attempt.id,
-              question_id: questionId,
-              selected_option: current.selected,
-              is_flagged: newFlagged,
-              answered_at: current.selected ? new Date().toISOString() : null,
-            },
-            { onConflict: "attempt_id,question_id" }
-          )
-        }
-
-        return { ...prev, [idx]: { ...current, isFlagged: newFlagged } }
-      })
-    },
-    [questions, attempt]
-  )
-
-  const handleSubmit = useCallback(async () => {
+  const handleFinish = useCallback(async () => {
     if (!attempt || !testSet || submitRef.current) return
     submitRef.current = true
     setSubmitting(true)
+    setShowFinishDialog(false)
 
     const supabase = createClient()
     let correctCount = 0
@@ -207,27 +142,16 @@ export default function TakeTestPage() {
       const isCorrect = selected === q.correct_option
       if (isCorrect) correctCount++
 
-      await supabase.from("attempt_answers").upsert(
-        {
-          attempt_id: attempt.id,
-          question_id: q.id,
-          selected_option: selected,
-          is_correct: selected ? isCorrect : null,
-          is_flagged: answer?.isFlagged ?? false,
-          answered_at: selected ? new Date().toISOString() : null,
-        },
-        { onConflict: "attempt_id,question_id" }
-      )
+      await supabase.from("attempt_answers").upsert({
+        attempt_id: attempt.id, question_id: q.id, selected_option: selected,
+        is_correct: selected ? isCorrect : null, is_flagged: answer?.isFlagged ?? false,
+        answered_at: selected ? new Date().toISOString() : null,
+      }, { onConflict: "attempt_id,question_id" })
     }
 
-    await supabase
-      .from("test_attempts")
-      .update({
-        score: correctCount,
-        completed_at: new Date().toISOString(),
-        status: "completed",
-      })
-      .eq("id", attempt.id)
+    await supabase.from("test_attempts").update({
+      score: correctCount, completed_at: new Date().toISOString(), status: "completed",
+    }).eq("id", attempt.id)
 
     toast.success("Test submitted!")
     router.push(`/tests/${testSetId}/results/${attempt.id}`)
@@ -235,152 +159,200 @@ export default function TakeTestPage() {
 
   const handleTimeUp = useCallback(() => {
     if (submitRef.current) return
-    toast.warning("Time's up! Your test will be submitted automatically.")
-    setShowSubmitDialog(false)
-    handleSubmit()
-  }, [handleSubmit])
-
-  const handleNavigate = useCallback((index: number) => {
-    setCurrentIndex(index)
-  }, [])
+    toast.warning("Time's up! Your test will be submitted.")
+    handleFinish()
+  }, [handleFinish])
 
   if (loading) {
     return (
-      <div className="flex min-h-[80vh] items-center justify-center">
-        <div className="size-8 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
+      <div className="flex min-h-screen items-center justify-center bg-[#0f172a]">
+        <div className="size-8 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
       </div>
     )
   }
 
   if (!testSet || questions.length === 0) {
     return (
-      <div className="flex min-h-[80vh] items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-[#0f172a]">
         <p className="text-slate-400">Test not found.</p>
       </div>
     )
   }
 
   const currentQuestion = questions[currentIndex]
+  const currentAnswer = answers[currentIndex] ?? { selected: null, isFlagged: false }
   const answeredCount = Object.values(answers).filter((a) => a.selected).length
   const unansweredCount = questions.length - answeredCount
 
+  // Reading tests have passage prepended to question_text (split by \n\n)
+  const parts = currentQuestion?.question_text?.split("\n\n") ?? []
+  const isReading = parts.length >= 2 || (currentQuestion?.question_text?.length ?? 0) > 500
+
   return (
-    <div className="min-h-[calc(100vh-3.5rem)] bg-[#0f172a]">
-      <div className="sticky top-14 z-30 flex h-14 items-center justify-between border-b border-white/10 bg-[#1e293b] px-4">
-        <div>
-          <h1 className="text-sm font-medium text-white">{testSet.name}</h1>
-          <p className="text-xs text-slate-400">
-            {answeredCount} of {questions.length} answered
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <ClockIcon className="size-4 text-slate-400" />
-          <Timer
-            durationMinutes={testSet.duration_minutes}
-            onTimeUp={handleTimeUp}
-          />
-        </div>
-        <Button
-          onClick={() => setShowSubmitDialog(true)}
-          className="bg-amber-400 font-medium text-[#1e293b] hover:bg-amber-300"
-        >
-          Submit Test
-        </Button>
-      </div>
-
-      <div className="flex h-[calc(100vh-7rem)]">
-        <div className="flex-1 overflow-auto p-6">
-          {currentQuestion && (
-            <QuestionCard
-              question={currentQuestion}
-              selectedOption={answers[currentIndex]?.selected ?? null}
-              isFlagged={answers[currentIndex]?.isFlagged ?? false}
-              onAnswer={handleAnswer}
-              onFlag={handleFlag}
-            />
-          )}
+    <div className="flex flex-col h-screen bg-white text-slate-800">
+      {/* Top Header Bar */}
+      <header className="flex items-center justify-between border-b bg-white px-4 h-10 shrink-0">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {/* Instructions - could link to a modal */}}
+            className="h-auto px-2 py-1 text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+          >
+            <InfoIcon className="size-3.5 mr-1" />
+            Instructions
+          </Button>
         </div>
 
-        <div className="w-72 overflow-auto border-l border-white/10 bg-[#1e293b] p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-medium text-white">Questions</h3>
-            <span className="text-xs text-slate-400">
-              {answeredCount}/{questions.length}
-            </span>
-          </div>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setShowSummary(true)}
+            className="flex items-center gap-1.5 rounded px-2 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+          >
+            <span className="font-semibold">Question {currentIndex + 1}</span>
+            <span className="text-slate-400">of {questions.length}</span>
+            <svg className="size-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+            </svg>
+          </button>
+          <Timer durationMinutes={testSet.duration_minutes} onTimeUp={handleTimeUp} />
+        </div>
 
-          <div className="mb-4 flex items-center gap-3 text-xs text-slate-400">
-            <span className="flex items-center gap-1">
-              <span className="size-2.5 rounded-sm bg-emerald-500/30" />{" "}
-              Answered
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="size-2.5 rounded-sm bg-white/10" /> Unanswered
-            </span>
-            <span className="flex items-center gap-1">
-              <BookmarkIcon className="size-3 fill-amber-400 text-amber-400" />{" "}
-              Flagged
-            </span>
-          </div>
+        <div className="w-20" /> {/* spacer for balance */}
+      </header>
 
-          <QuestionNav
-            totalQuestions={questions.length}
-            currentIndex={currentIndex}
-            answers={answers}
-            onNavigate={handleNavigate}
-          />
-
-          <div className="mt-6 border-t border-white/10 pt-4">
-            <div className="space-y-1 text-xs text-slate-400">
-              <div className="flex justify-between">
-                <span>Answered</span>
-                <span className="text-emerald-400">{answeredCount}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Unanswered</span>
-                <span className="text-red-400">{unansweredCount}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Flagged</span>
-                <span className="text-amber-400">
-                  {Object.values(answers).filter((a) => a.isFlagged).length}
-                </span>
+      {/* Main Content */}
+      <main className="flex-1 overflow-hidden flex">
+        {isReading ? (
+          // Two-column layout for reading tests
+          <>
+            <div className="w-1/2 overflow-auto border-r p-6">
+              <div className="max-w-lg mx-auto">
+                <div className="text-sm leading-relaxed whitespace-pre-wrap text-slate-700">
+                  {parts[0]}
+                </div>
               </div>
             </div>
+            <div className="w-1/2 overflow-auto p-6">
+              <div className="max-w-lg mx-auto">
+                <p className="text-sm text-slate-500 mb-2">{parts[1] || "Choose the correct answer:"}</p>
+                {currentQuestion && (
+                  <QuestionCard
+                    question={currentQuestion}
+                    selectedOption={currentAnswer.selected}
+                    isFlagged={currentAnswer.isFlagged}
+                    onAnswer={handleAnswer}
+                    onFlag={undefined}
+                    dark={false}
+                    compact
+                  />
+                )}
+              </div>
+            </div>
+          </>
+        ) : (
+          // Single-column layout for math/thinking
+          <div className="flex-1 overflow-auto p-6 flex justify-center">
+            <div className="w-full max-w-3xl">
+              {currentQuestion && (
+                <QuestionCard
+                  question={currentQuestion}
+                  selectedOption={currentAnswer.selected}
+                  isFlagged={currentAnswer.isFlagged}
+                  onAnswer={handleAnswer}
+                  onFlag={undefined}
+                  dark={false}
+                />
+              )}
+            </div>
           </div>
-        </div>
-      </div>
+        )}
+      </main>
 
-      <Dialog open={showSubmitDialog} onOpenChange={setShowSubmitDialog}>
+      {/* Fixed Footer Bar */}
+      <footer className="flex items-center justify-between border-t bg-white px-4 h-12 shrink-0">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleBack}
+          disabled={currentIndex === 0}
+          className="text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30"
+        >
+          <ChevronLeftIcon className="size-4 mr-1" />
+          Back
+        </Button>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleFlag}
+            className={`text-sm transition-colors ${
+              currentAnswer.isFlagged
+                ? "text-amber-600 bg-amber-50 hover:bg-amber-100"
+                : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
+            }`}
+          >
+            <FlagIcon className={`size-4 mr-1 ${currentAnswer.isFlagged ? "fill-amber-400 text-amber-400" : ""}`} />
+            {currentAnswer.isFlagged ? "Flagged" : "Flag this question"}
+          </Button>
+        </div>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleNext}
+          className="text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+        >
+          {currentIndex >= questions.length - 1 ? "Finish" : "Next"}
+          <ChevronRightIcon className="size-4 ml-1" />
+        </Button>
+      </footer>
+
+      {/* Progress Summary Overlay */}
+      {showSummary && (
+        <ProgressSummary
+          totalQuestions={questions.length}
+          currentIndex={currentIndex}
+          answers={answers}
+          visitedQuestions={visited}
+          onNavigate={goTo}
+          onClose={() => setShowSummary(false)}
+        />
+      )}
+
+      {/* Finish Confirmation Dialog */}
+      <Dialog open={showFinishDialog} onOpenChange={setShowFinishDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Submit Test</DialogTitle>
+            <DialogTitle className="text-lg font-semibold">Finish Test</DialogTitle>
             <DialogDescription>
-              <div className="space-y-2">
+              <div className="space-y-3 mt-2">
                 {unansweredCount > 0 && (
-                  <p className="flex items-center gap-2 text-amber-500">
-                    <AlertTriangleIcon className="size-4" />
-                    You have {unansweredCount} unanswered question
-                    {unansweredCount !== 1 ? "s" : ""}.
+                  <p className="flex items-center gap-2 text-amber-600 text-sm">
+                    <AlertTriangleIcon className="size-4 shrink-0" />
+                    You have {unansweredCount} unanswered question{unansweredCount !== 1 ? "s" : ""}.
                   </p>
                 )}
-                <p>You cannot change your answers after submission.</p>
+                <p className="text-sm text-slate-500">
+                  You have answered {answeredCount} of {questions.length} questions.
+                </p>
+                <p className="text-sm text-slate-500">
+                  Once you finish, you cannot change your answers. Make sure to review any flagged questions before finishing.
+                </p>
               </div>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <DialogClose render={<Button variant="outline" />}>
-              Cancel
+              Go Back
             </DialogClose>
             <Button
-              onClick={() => {
-                setShowSubmitDialog(false)
-                handleSubmit()
-              }}
+              onClick={handleFinish}
               disabled={submitting}
-              className="bg-amber-400 font-medium text-[#1e293b] hover:bg-amber-300"
+              className="bg-blue-600 font-medium text-white hover:bg-blue-500"
             >
-              {submitting ? "Submitting..." : "Submit"}
+              {submitting ? "Submitting..." : "Finish Test"}
             </Button>
           </DialogFooter>
         </DialogContent>
